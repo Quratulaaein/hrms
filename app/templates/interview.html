@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Proctored AI Interview</title>
+</head>
+<body>
+
+<h2>Proctored AI Interview</h2>
+
+<p><b>Current Question:</b></p>
+<p id="question">Click Start Interview</p>
+
+<p id="timer"></p>
+
+<video id="camera" width="320" height="240" autoplay muted></video>
+
+<br><br>
+
+<button id="start-btn">Start Interview</button>
+<button id="answer-btn" disabled>Answer</button>
+<button id="stop-btn" disabled>Stop</button>
+
+<script>
+    const candidateId = "{{ candidate_id }}"
+    const role = "{{ role }}"
+</script>
+
+<script src="/static/interview.js?v=6"></script>
+
+</body>
+</html>
