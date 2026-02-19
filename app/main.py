@@ -1,6 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, Depends, BackgroundTasks, Form
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 import pandas as pd
 import uuid
@@ -20,6 +21,15 @@ from app.interview_question_generator import generate_questions
 from app.config import settings
 
 app = FastAPI()
+
+# enable CORS for frontend (lovable / vercel)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # later you can restrict to your frontend domain
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -134,7 +144,7 @@ async def upload_excel(file: UploadFile = File(...), db: Session = Depends(get_d
         db.commit()
 
         if cv_score >= CV_THRESHOLD:
-            link = "https://yourdomain.com/login"
+            link = f"{settings.HR_INTERVIEW_CALENDAR}/login"
             upsert_ghl_contact(
                 name=name,
                 email=email,
@@ -198,7 +208,6 @@ def interview_page(candidate_id: str, role: str, db: Session = Depends(get_db)):
     <html>
     <body>
         <h2>AI Interview - {role}</h2>
-
         <video id="video" width="400" autoplay muted></video>
         <h3 id="question"></h3>
         <h4 id="timer">Time: 120</h4>
@@ -219,7 +228,7 @@ def interview_page(candidate_id: str, role: str, db: Session = Depends(get_db)):
 
             if (data.finished) {{
                 document.getElementById("question").innerText =
-                "Thank you for completing the interview. Please close this window.";
+                "Interview completed. You may close this window.";
                 document.getElementById("timer").innerText = "";
                 return;
             }}
@@ -286,77 +295,3 @@ def interview_page(candidate_id: str, role: str, db: Session = Depends(get_db)):
     </body>
     </html>
     """
-
-
-@app.get("/interview/question/{candidate_id}")
-def get_question(candidate_id: str, db: Session = Depends(get_db)):
-    answers = db.query(InterviewAnswer)\
-        .filter_by(candidate_id=candidate_id)\
-        .order_by(InterviewAnswer.question_number)\
-        .all()
-
-    answered = len([a for a in answers if a.audio_path])
-
-    if answered >= TOTAL_QUESTIONS:
-        return {"finished": True}
-
-    return {"question": answers[answered].question_text}
-
-
-@app.post("/interview/answer/{candidate_id}")
-async def save_answer(
-    candidate_id: str,
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db)
-):
-    answers = db.query(InterviewAnswer)\
-        .filter_by(candidate_id=candidate_id)\
-        .order_by(InterviewAnswer.question_number)\
-        .all()
-
-    current = len([a for a in answers if a.audio_path])
-
-    if current >= TOTAL_QUESTIONS:
-        return {"message": "Already completed"}
-
-    file_path = os.path.join(UPLOAD_FOLDER, f"{candidate_id}_{current+1}.webm")
-
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
-    answer = answers[current]
-    answer.audio_path = file_path
-    db.commit()
-
-    return {"message": "Answer saved"}
-
-
-@app.get("/admin/dashboard", response_class=HTMLResponse)
-def admin_dashboard(db: Session = Depends(get_db)):
-    candidates = db.query(Candidate).all()
-
-    html = "<h2>Admin Dashboard</h2><br>"
-
-    for c in candidates:
-        html += f"<b>{c.name}</b> | {c.status} | "
-        html += f"<a href='/admin/recordings/{c.id}'>View Recordings</a><br><br>"
-
-    return html
-
-
-@app.get("/admin/recordings/{candidate_id}", response_class=HTMLResponse)
-def view_recordings(candidate_id: str, db: Session = Depends(get_db)):
-    answers = db.query(InterviewAnswer).filter_by(candidate_id=candidate_id).all()
-
-    html = "<h3>Interview Recordings</h3><br>"
-
-    for a in answers:
-        if a.audio_path:
-            html += f"""
-            Question {a.question_number}<br>
-            <video width="400" controls>
-                <source src="/uploads/{os.path.basename(a.audio_path)}" type="video/webm">
-            </video><br><br>
-            """
-
-    return html
