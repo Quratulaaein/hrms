@@ -1,5 +1,0 @@
-from google import genai
-client = genai.Client(api_key="AIzaSyC4QzboUdo33nYaHAOC_1h70KAYGOXbu_E")
-
-for m in client.models.list():
-    print(m.name)
