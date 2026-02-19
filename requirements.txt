@@ -8,3 +8,7 @@ python-multipart
 pydantic-settings
 python-dotenv
 jinja2
+pdfminer.six
+pypdfium2
+Pillow
+pdfplumber
