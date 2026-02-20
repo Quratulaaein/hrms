@@ -103,9 +103,20 @@ def upsert_ghl_contact(name, email, phone, interview_link, score, username, pass
         ]
     }
 
-    requests.post(settings.GHL_API_URL, headers=headers, json=payload)
+    try:
+        response = requests.post(
+            settings.GHL_API_URL,
+            headers=headers,
+            json=payload,
+            timeout=15
+        )
 
+        print("GHL STATUS:", response.status_code)
+        print("GHL RESPONSE:", response.text)
 
+    except Exception as e:
+        print("GHL ERROR:", str(e))
+        
 @app.get("/")
 def root():
     return {"status": "HRMS ATS running"}
