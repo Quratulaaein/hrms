@@ -80,6 +80,7 @@ async def safe_ai_parse(resume_text):
 
 
 def upsert_ghl_contact(name, email, phone, interview_link, score, username, password):
+    base_url = "https://services.leadconnectorhq.com"
     headers = {
         "Authorization": f"Bearer {settings.GHL_API_KEY}",
         "Version": "2021-07-28",
@@ -89,27 +90,60 @@ def upsert_ghl_contact(name, email, phone, interview_link, score, username, pass
     first = name.split()[0]
     last = " ".join(name.split()[1:]) if len(name.split()) > 1 else ""
 
-    payload = {
-        "firstName": first,
-        "lastName": last,
-        "email": email,
-        "phone": phone,
-        "locationId": settings.GHL_LOCATION_ID,
-        "customFields": [
-            {"id": settings.GHL_SCORE_FIELD_ID, "value": str(score)},
-            {"id": settings.GHL_LINK_FIELD_ID, "value": interview_link},
-            {"id": settings.GHL_USERNAME_FIELD_ID, "value": username},
-            {"id": settings.GHL_PASSWORD_FIELD_ID, "value": password}
-        ]
-    }
-
     try:
-        response = requests.put(
-            "https://services.leadconnectorhq.com/contacts/",
+        # =============================
+        # 1️⃣ SEARCH CONTACT BY EMAIL
+        # =============================
+        search_response = requests.get(
+            f"{base_url}/contacts/search",
             headers=headers,
-            json=payload,
+            params={
+                "email": email,
+                "locationId": settings.GHL_LOCATION_ID
+            },
             timeout=15
         )
+
+        search_data = search_response.json()
+        contact_id = None
+
+        if search_response.status_code == 200 and search_data.get("contacts"):
+            contact_id = search_data["contacts"][0]["id"]
+
+        payload = {
+            "firstName": first,
+            "lastName": last,
+            "email": email,
+            "phone": phone,
+            "locationId": settings.GHL_LOCATION_ID,
+            "customFields": [
+                {"id": settings.GHL_SCORE_FIELD_ID, "value": str(score)},
+                {"id": settings.GHL_LINK_FIELD_ID, "value": interview_link},
+                {"id": settings.GHL_USERNAME_FIELD_ID, "value": username},
+                {"id": settings.GHL_PASSWORD_FIELD_ID, "value": password},
+            ]
+        }
+
+        # =============================
+        # 2️⃣ UPDATE IF EXISTS
+        # =============================
+        if contact_id:
+            response = requests.put(
+                f"{base_url}/contacts/{contact_id}",
+                headers=headers,
+                json=payload,
+                timeout=15
+            )
+        else:
+            # =============================
+            # 3️⃣ CREATE IF NOT EXISTS
+            # =============================
+            response = requests.post(
+                f"{base_url}/contacts/",
+                headers=headers,
+                json=payload,
+                timeout=15
+            )
 
         print("GHL STATUS:", response.status_code)
         print("GHL RESPONSE:", response.text)
