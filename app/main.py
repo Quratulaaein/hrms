@@ -91,12 +91,27 @@ def upsert_ghl_contact(name, email, phone, interview_link, score, username, pass
     first = name.split()[0]
     last = " ".join(name.split()[1:]) if len(name.split()) > 1 else ""
 
-    payload = {
+    # Payload for CREATE (includes locationId)
+    create_payload = {
         "firstName": first,
         "lastName": last,
         "email": email,
         "phone": phone,
         "locationId": settings.GHL_LOCATION_ID,
+        "customFields": [
+            {"id": settings.GHL_SCORE_FIELD_ID, "value": str(score)},
+            {"id": settings.GHL_LINK_FIELD_ID, "value": interview_link},
+            {"id": settings.GHL_USERNAME_FIELD_ID, "value": username},
+            {"id": settings.GHL_PASSWORD_FIELD_ID, "value": password},
+        ]
+    }
+
+    # Payload for UPDATE (no locationId)
+    update_payload = {
+        "firstName": first,
+        "lastName": last,
+        "email": email,
+        "phone": phone,
         "customFields": [
             {"id": settings.GHL_SCORE_FIELD_ID, "value": str(score)},
             {"id": settings.GHL_LINK_FIELD_ID, "value": interview_link},
@@ -131,7 +146,7 @@ def upsert_ghl_contact(name, email, phone, interview_link, score, username, pass
             response = requests.put(
                 f"{base_url}/contacts/{contact_id}",
                 headers=headers,
-                json=payload,
+                json=update_payload,  # ← no locationId
                 timeout=15
             )
             print(f"GHL UPDATE STATUS: {response.status_code}")
@@ -141,23 +156,23 @@ def upsert_ghl_contact(name, email, phone, interview_link, score, username, pass
             response = requests.post(
                 f"{base_url}/contacts/",
                 headers=headers,
-                json=payload,
+                json=create_payload,  # ← includes locationId
                 timeout=15
             )
             print(f"GHL CREATE STATUS: {response.status_code}")
             print(f"GHL CREATE RESPONSE: {response.text}")
 
-            # Step 3: If POST fails due to duplicate, extract contactId and update
+            # Step 3: Fallback — if duplicate, extract id from error and update
             if response.status_code == 400:
                 resp_data = response.json()
                 fallback_id = resp_data.get("meta", {}).get("contactId")
 
                 if fallback_id:
-                    print(f"GHL duplicate detected, updating existing contact: {fallback_id}")
+                    print(f"GHL duplicate detected, updating: {fallback_id}")
                     update_response = requests.put(
                         f"{base_url}/contacts/{fallback_id}",
                         headers=headers,
-                        json=payload,
+                        json=update_payload,  # ← no locationId
                         timeout=15
                     )
                     print(f"GHL FALLBACK UPDATE STATUS: {update_response.status_code}")
