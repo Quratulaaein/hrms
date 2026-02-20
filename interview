@@ -1,0 +1,19 @@
+import pdfMiner
+
+def load_pdf(r"C:\Users\Qurat ul aaein\Documents\My documents")
+reader = pdfMiner(r"C:\Users\Qurat ul aaein\Documents\My documents")
+text = " "
+for page in reader.pages:
+    text += page.extract_text()
+    return text
+
+def chunking (text, size=500):
+    words = text.split()
+    chunks = []
+    i=0
+    while i<len(words):
+        chunk = words[i:i+size]
+        chunk.append(" ".join(chunk))
+        i += size
+        
+    return chunks

@@ -101,59 +101,70 @@ def root():
 
 @app.post("/excel/upload")
 async def upload_excel(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    df = pd.read_excel(file.file)
+
+    excel_data = pd.read_excel(file.file, sheet_name=None)
     jd_map = get_jd_requirements()
 
-    for _, row in df.iterrows():
-        name = row["Applicant Name"]
-        email = row["Email"]
-        phone = row.get("Mobile", "")
-        role = row.get("Role", "Outbound Sales")
-        cv_url = row["CV URL"]
+    for sheet_name, df in excel_data.items():
 
-        local_cv = download_cv_from_drive(cv_url)
-        if not local_cv:
+        if sheet_name.strip().lower() == "jd":
             continue
 
-        resume_text = parse_cv(local_cv)
-        profile = parse_resume_with_ai(resume_text)
+        for _, row in df.iterrows():
+            try:
+                name = row["Applicant Name"]
+                email = row["Email"]
+                phone = row.get("Mobile", "")
+                role = sheet_name
+                cv_url = row["CV URL"]
 
-        jd = jd_map.get(role)
-        if not jd:
-            continue
+                local_cv = download_cv_from_drive(cv_url)
+                if not local_cv:
+                    continue
 
-        cv_score, _ = score_candidate(profile, jd)
+                resume_text = parse_cv(local_cv)
+                profile = parse_resume_with_ai(resume_text)
 
-        username = email
-        password = str(uuid.uuid4())[:8]
+                jd = jd_map.get(role)
+                if not jd:
+                    continue
 
-        candidate = Candidate(
-            id=str(uuid.uuid4()),
-            name=name,
-            email=email,
-            role=role,
-            username=username,
-            password=password,
-            cv_score=cv_score,
-            status="shortlisted" if cv_score >= CV_THRESHOLD else "rejected",
-            interview_deadline=datetime.utcnow() + timedelta(days=3),
-            created_at=datetime.utcnow()
-        )
+                cv_score, _ = score_candidate(profile, jd)
 
-        db.add(candidate)
-        db.commit()
+                username = email
+                password = str(uuid.uuid4())[:8]
 
-        if cv_score >= CV_THRESHOLD:
-            link = f"{settings.HR_INTERVIEW_CALENDAR}/login"
-            upsert_ghl_contact(
-                name=name,
-                email=email,
-                phone=phone,
-                interview_link=link,
-                score=0,
-                username=username,
-                password=password
-            )
+                candidate = Candidate(
+                    id=str(uuid.uuid4()),
+                    name=name,
+                    email=email,
+                    role=role,
+                    username=username,
+                    password=password,
+                    cv_score=cv_score,
+                    status="shortlisted" if cv_score >= CV_THRESHOLD else "rejected",
+                    interview_deadline=datetime.utcnow() + timedelta(days=3),
+                    created_at=datetime.utcnow()
+                )
+
+                db.add(candidate)
+                db.commit()
+
+                if cv_score >= CV_THRESHOLD:
+                    link = f"{settings.HR_INTERVIEW_CALENDAR}/login"
+                    upsert_ghl_contact(
+                        name=name,
+                        email=email,
+                        phone=phone,
+                        interview_link=link,
+                        score=0,
+                        username=username,
+                        password=password
+                    )
+
+            except Exception as e:
+                print("Row failed:", e)
+                continue
 
     return {"message": "Excel processed successfully"}
 
