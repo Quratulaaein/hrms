@@ -9,6 +9,7 @@ import shutil
 import os
 import re
 import requests
+import asyncio
 from datetime import datetime, timedelta
 
 from app.database import SessionLocal
@@ -22,10 +23,10 @@ from app.config import settings
 
 app = FastAPI()
 
-# enable CORS for frontend (lovable / vercel)
+# enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # later you can restrict to your frontend domain
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -65,6 +66,20 @@ def download_cv_from_drive(url: str):
         f.write(response.content)
 
     return file_path
+
+
+# safe ai call with retry and truncation
+async def safe_ai_parse(resume_text):
+    for attempt in range(5):
+        try:
+            return parse_resume_with_ai(resume_text[:3000])
+        except Exception as e:
+            if "rate_limit" in str(e):
+                wait_time = 3 + attempt * 2
+                await asyncio.sleep(wait_time)
+            else:
+                raise e
+    return None
 
 
 def upsert_ghl_contact(name, email, phone, interview_link, score, username, password):
@@ -110,20 +125,30 @@ async def upload_excel(file: UploadFile = File(...), db: Session = Depends(get_d
         if sheet_name.strip().lower() == "jd":
             continue
 
+        df.columns = df.columns.str.strip().str.lower()
+
         for _, row in df.iterrows():
             try:
-                name = row["Applicant Name"]
-                email = row["Email"]
-                phone = row.get("Mobile", "")
+                name = row.get("applicant name") or row.get("name")
+                email = row.get("email")
+                phone = row.get("mobile") or ""
+                cv_url = row.get("cv url") or row.get("cv")
                 role = sheet_name
-                cv_url = row["CV URL"]
+
+                if not name or not email or not cv_url:
+                    continue
 
                 local_cv = download_cv_from_drive(cv_url)
                 if not local_cv:
                     continue
 
                 resume_text = parse_cv(local_cv)
-                profile = parse_resume_with_ai(resume_text)
+
+                profile = await safe_ai_parse(resume_text)
+                if not profile:
+                    continue
+
+                await asyncio.sleep(2)
 
                 jd = jd_map.get(role)
                 if not jd:
@@ -143,7 +168,6 @@ async def upload_excel(file: UploadFile = File(...), db: Session = Depends(get_d
                     password=password,
                     cv_score=cv_score,
                     status="shortlisted" if cv_score >= CV_THRESHOLD else "rejected",
-                    interview_deadline=datetime.utcnow() + timedelta(days=3),
                     created_at=datetime.utcnow()
                 )
 
@@ -273,10 +297,8 @@ def interview_page(candidate_id: str, role: str, db: Session = Depends(get_db)):
         function startRecording() {{
             chunks = [];
             mediaRecorder = new MediaRecorder(currentStream);
-
             mediaRecorder.ondataavailable = e => chunks.push(e.data);
             mediaRecorder.onstop = sendAnswer;
-
             mediaRecorder.start();
             startTimer();
         }}
