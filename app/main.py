@@ -80,7 +80,8 @@ async def safe_ai_parse(resume_text):
 
 
 def upsert_ghl_contact(name, email, phone, interview_link, score, username, password):
-    base_url = "https://services.leadconnectorhq.com"
+    base_url = settings.GHL_API_BASE
+
     headers = {
         "Authorization": f"Bearer {settings.GHL_API_KEY}",
         "Version": "2021-07-28",
@@ -91,10 +92,8 @@ def upsert_ghl_contact(name, email, phone, interview_link, score, username, pass
     last = " ".join(name.split()[1:]) if len(name.split()) > 1 else ""
 
     try:
-        # =============================
-        # 1️⃣ SEARCH CONTACT BY EMAIL
-        # =============================
-        search_response = requests.get(
+        # Search contact by email
+        search = requests.get(
             f"{base_url}/contacts/search",
             headers=headers,
             params={
@@ -104,11 +103,12 @@ def upsert_ghl_contact(name, email, phone, interview_link, score, username, pass
             timeout=15
         )
 
-        search_data = search_response.json()
         contact_id = None
 
-        if search_response.status_code == 200 and search_data.get("contacts"):
-            contact_id = search_data["contacts"][0]["id"]
+        if search.status_code == 200:
+            data = search.json()
+            if data.get("contacts"):
+                contact_id = data["contacts"][0]["id"]
 
         payload = {
             "firstName": first,
@@ -124,9 +124,7 @@ def upsert_ghl_contact(name, email, phone, interview_link, score, username, pass
             ]
         }
 
-        # =============================
-        # 2️⃣ UPDATE IF EXISTS
-        # =============================
+        # If contact exists → update
         if contact_id:
             response = requests.put(
                 f"{base_url}/contacts/{contact_id}",
@@ -135,9 +133,7 @@ def upsert_ghl_contact(name, email, phone, interview_link, score, username, pass
                 timeout=15
             )
         else:
-            # =============================
-            # 3️⃣ CREATE IF NOT EXISTS
-            # =============================
+            # Else create new
             response = requests.post(
                 f"{base_url}/contacts/",
                 headers=headers,
