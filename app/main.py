@@ -92,13 +92,13 @@ def upsert_ghl_contact(name, email, phone, interview_link, score, username, pass
     last = " ".join(name.split()[1:]) if len(name.split()) > 1 else ""
 
     try:
-        # Search contact by email
+        # Correct contact search (v2)
         search = requests.get(
-            f"{base_url}/contacts/search",
+            f"{base_url}/contacts/",
             headers=headers,
             params={
-                "email": email,
-                "locationId": settings.GHL_LOCATION_ID
+                "locationId": settings.GHL_LOCATION_ID,
+                "query": email
             },
             timeout=15
         )
@@ -107,8 +107,11 @@ def upsert_ghl_contact(name, email, phone, interview_link, score, username, pass
 
         if search.status_code == 200:
             data = search.json()
-            if data.get("contacts"):
-                contact_id = data["contacts"][0]["id"]
+            contacts = data.get("contacts", [])
+            for c in contacts:
+                if c.get("email", "").lower() == email.lower():
+                    contact_id = c.get("id")
+                    break
 
         payload = {
             "firstName": first,
@@ -124,7 +127,6 @@ def upsert_ghl_contact(name, email, phone, interview_link, score, username, pass
             ]
         }
 
-        # If contact exists → update
         if contact_id:
             response = requests.put(
                 f"{base_url}/contacts/{contact_id}",
@@ -133,7 +135,6 @@ def upsert_ghl_contact(name, email, phone, interview_link, score, username, pass
                 timeout=15
             )
         else:
-            # Else create new
             response = requests.post(
                 f"{base_url}/contacts/",
                 headers=headers,
@@ -146,7 +147,7 @@ def upsert_ghl_contact(name, email, phone, interview_link, score, username, pass
 
     except Exception as e:
         print("GHL ERROR:", str(e))
-        
+              
 @app.get("/")
 def root():
     return {"status": "HRMS ATS running"}
