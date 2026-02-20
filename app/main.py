@@ -91,8 +91,24 @@ def upsert_ghl_contact(name, email, phone, interview_link, score, username, pass
     first = name.split()[0]
     last = " ".join(name.split()[1:]) if len(name.split()) > 1 else ""
 
+    payload = {
+        "firstName": first,
+        "lastName": last,
+        "email": email,
+        "phone": phone,
+        "locationId": settings.GHL_LOCATION_ID,
+        "customFields": [
+            {"id": settings.GHL_SCORE_FIELD_ID, "value": str(score)},
+            {"id": settings.GHL_LINK_FIELD_ID, "value": interview_link},
+            {"id": settings.GHL_USERNAME_FIELD_ID, "value": username},
+            {"id": settings.GHL_PASSWORD_FIELD_ID, "value": password},
+        ]
+    }
+
     try:
-        # Correct contact search (v2)
+        # Step 1: Try to find existing contact by email
+        contact_id = None
+
         search = requests.get(
             f"{base_url}/contacts/",
             headers=headers,
@@ -103,30 +119,14 @@ def upsert_ghl_contact(name, email, phone, interview_link, score, username, pass
             timeout=15
         )
 
-        contact_id = None
-
         if search.status_code == 200:
-            data = search.json()
-            contacts = data.get("contacts", [])
+            contacts = search.json().get("contacts", [])
             for c in contacts:
                 if c.get("email", "").lower() == email.lower():
                     contact_id = c.get("id")
                     break
 
-        payload = {
-            "firstName": first,
-            "lastName": last,
-            "email": email,
-            "phone": phone,
-            "locationId": settings.GHL_LOCATION_ID,
-            "customFields": [
-                {"id": settings.GHL_SCORE_FIELD_ID, "value": str(score)},
-                {"id": settings.GHL_LINK_FIELD_ID, "value": interview_link},
-                {"id": settings.GHL_USERNAME_FIELD_ID, "value": username},
-                {"id": settings.GHL_PASSWORD_FIELD_ID, "value": password},
-            ]
-        }
-
+        # Step 2: Update if found, create if not
         if contact_id:
             response = requests.put(
                 f"{base_url}/contacts/{contact_id}",
@@ -134,6 +134,9 @@ def upsert_ghl_contact(name, email, phone, interview_link, score, username, pass
                 json=payload,
                 timeout=15
             )
+            print(f"GHL UPDATE STATUS: {response.status_code}")
+            print(f"GHL UPDATE RESPONSE: {response.text}")
+
         else:
             response = requests.post(
                 f"{base_url}/contacts/",
@@ -141,9 +144,24 @@ def upsert_ghl_contact(name, email, phone, interview_link, score, username, pass
                 json=payload,
                 timeout=15
             )
+            print(f"GHL CREATE STATUS: {response.status_code}")
+            print(f"GHL CREATE RESPONSE: {response.text}")
 
-        print("GHL STATUS:", response.status_code)
-        print("GHL RESPONSE:", response.text)
+            # Step 3: If POST fails due to duplicate, extract contactId and update
+            if response.status_code == 400:
+                resp_data = response.json()
+                fallback_id = resp_data.get("meta", {}).get("contactId")
+
+                if fallback_id:
+                    print(f"GHL duplicate detected, updating existing contact: {fallback_id}")
+                    update_response = requests.put(
+                        f"{base_url}/contacts/{fallback_id}",
+                        headers=headers,
+                        json=payload,
+                        timeout=15
+                    )
+                    print(f"GHL FALLBACK UPDATE STATUS: {update_response.status_code}")
+                    print(f"GHL FALLBACK UPDATE RESPONSE: {update_response.text}")
 
     except Exception as e:
         print("GHL ERROR:", str(e))
