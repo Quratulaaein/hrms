@@ -36,6 +36,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 CV_THRESHOLD = 50
+BASIC_THRESHOLD = 20
 
 
 def get_db():
@@ -148,16 +149,18 @@ async def upload_excel(file: UploadFile = File(...), db: Session = Depends(get_d
                 # basic keyword scoring
                 basic_score = 0
 
-                for keyword in jd.get("must_have_skills", []):
+                for keyword in jd.get("required_skills", []):
                     if keyword.lower() in resume_lower:
                         basic_score += 10
 
-                for keyword in jd.get("good_to_have_skills", []):
+                for keyword in jd.get("tools", []):
                     if keyword.lower() in resume_lower:
                         basic_score += 5
+                
+                min_exp = jd.get("min_exp", 0)
 
                 # decide whether to call AI
-                if basic_score >= 20:
+                if basic_score >= BASIC_THRESHOLD:
                     profile = await safe_ai_parse(resume_text)
                     if profile:
                         cv_score, _ = score_candidate(profile, jd)
@@ -174,6 +177,7 @@ async def upload_excel(file: UploadFile = File(...), db: Session = Depends(get_d
                     id=str(uuid.uuid4()),
                     name=name,
                     email=email,
+                    phone=phone,
                     role=role,
                     username=username,
                     password=password,
