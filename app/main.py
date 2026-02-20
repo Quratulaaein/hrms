@@ -104,8 +104,8 @@ def upsert_ghl_contact(name, email, phone, interview_link, score, username, pass
     }
 
     try:
-        response = requests.post(
-            settings.GHL_API_URL,
+        response = requests.put(
+            "https://services.leadconnectorhq.com/contacts/",
             headers=headers,
             json=payload,
             timeout=15
