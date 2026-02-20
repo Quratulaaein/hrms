@@ -13,3 +13,4 @@ pypdfium2
 Pillow
 pdfplumber
 python-docx
+openpyxl
