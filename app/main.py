@@ -109,13 +109,22 @@ def upsert_ghl_contact(name, email, phone, interview_link, score, username, pass
 @app.get("/")
 def root():
     return {"status": "HRMS ATS running"}
-
-
 @app.post("/excel/upload")
 async def upload_excel(file: UploadFile = File(...), db: Session = Depends(get_db)):
 
     excel_data = pd.read_excel(file.file, sheet_name=None)
     jd_map = get_jd_requirements()
+
+    SALES_CORE = [
+        "sales", "b2b", "lead generation", "cold calling",
+        "outreach", "prospecting", "closing", "negotiation",
+        "pipeline", "demo"
+    ]
+
+    SAAS_TERMS = [
+        "saas", "cloud", "ai", "enterprise", "crm",
+        "salesforce", "hubspot", "azure", "google workspace"
+    ]
 
     for sheet_name, df in excel_data.items():
 
@@ -130,13 +139,9 @@ async def upload_excel(file: UploadFile = File(...), db: Session = Depends(get_d
                 email = row.get("email")
                 phone = row.get("mobile") or ""
                 cv_url = row.get("cv url") or row.get("cv")
-                role = sheet_name
+                role = sheet_name.strip()
 
                 if not name or not email or not cv_url:
-                    continue
-
-                jd = jd_map.get(role)
-                if not jd:
                     continue
 
                 local_cv = download_cv_from_drive(cv_url)
@@ -146,32 +151,37 @@ async def upload_excel(file: UploadFile = File(...), db: Session = Depends(get_d
                 resume_text = parse_cv(local_cv)
                 resume_lower = resume_text.lower()
 
-                # basic keyword scoring
-                basic_score = 0
+                total_score = 0
 
-                for keyword in jd.get("required_skills", []):
-                    if keyword.lower() in resume_lower:
-                        basic_score += 10
+                # 1️⃣ Core Sales Scoring
+                sales_hits = sum(1 for k in SALES_CORE if k in resume_lower)
+                total_score += min(sales_hits * 10, 40)
 
-                for keyword in jd.get("tools", []):
-                    if keyword.lower() in resume_lower:
-                        basic_score += 5
-                
-                min_exp = jd.get("min_exp", 0)
+                # 2️⃣ SaaS / Cloud / AI Exposure
+                saas_hits = sum(1 for k in SAAS_TERMS if k in resume_lower)
+                total_score += min(saas_hits * 8, 25)
 
-                # decide whether to call AI
-                if basic_score >= BASIC_THRESHOLD:
-                    profile = await safe_ai_parse(resume_text)
-                    if profile:
-                        cv_score, _ = score_candidate(profile, jd)
-                    else:
-                        cv_score = basic_score
-                else:
-                    cv_score = basic_score
+                # 3️⃣ CRM Tools
+                crm_hits = sum(1 for k in ["salesforce", "hubspot", "zoho", "pipedrive"] if k in resume_lower)
+                total_score += min(crm_hits * 7, 15)
+
+                # 4️⃣ B2B / Enterprise bonus
+                if "b2b" in resume_lower or "enterprise" in resume_lower:
+                    total_score += 10
+
+                # 5️⃣ Experience
+                exp_match = re.search(r'(\d+)\s+years', resume_lower)
+                if exp_match:
+                    years = int(exp_match.group(1))
+                    if years >= 2:
+                        total_score += 10
+
+                cv_score = total_score
 
                 username = email
                 password = str(uuid.uuid4())[:8]
-                status = "shortlisted" if cv_score >= CV_THRESHOLD else "rejected"
+
+                status = "shortlisted" if cv_score >= 40 else "rejected"
 
                 candidate = Candidate(
                     id=str(uuid.uuid4()),
@@ -189,7 +199,6 @@ async def upload_excel(file: UploadFile = File(...), db: Session = Depends(get_d
                 db.add(candidate)
                 db.commit()
 
-                # send to GHL only if shortlisted
                 if status == "shortlisted":
                     link = f"{settings.HR_INTERVIEW_CALENDAR}/login"
                     upsert_ghl_contact(
@@ -207,7 +216,6 @@ async def upload_excel(file: UploadFile = File(...), db: Session = Depends(get_d
                 continue
 
     return {"message": "Excel processed successfully"}
-
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page():
