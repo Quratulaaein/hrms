@@ -1,16 +1,15 @@
-from fastapi import FastAPI, UploadFile, File, Depends, BackgroundTasks, Form
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import FastAPI, UploadFile, File, Depends, Form
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 import pandas as pd
 import uuid
-import shutil
 import os
 import re
 import requests
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from app.database import SessionLocal
 from app.models import Candidate, InterviewAnswer
@@ -34,11 +33,9 @@ app.add_middleware(
 
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 CV_THRESHOLD = 50
-TOTAL_QUESTIONS = 5
 
 
 def get_db():
@@ -56,8 +53,8 @@ def download_cv_from_drive(url: str):
 
     file_id = match.group(1)
     download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
-
     response = requests.get(download_url)
+
     if response.status_code != 200:
         return None
 
@@ -68,15 +65,14 @@ def download_cv_from_drive(url: str):
     return file_path
 
 
-# safe ai call with retry and truncation
+# safe ai call with retry
 async def safe_ai_parse(resume_text):
     for attempt in range(5):
         try:
             return parse_resume_with_ai(resume_text[:3000])
         except Exception as e:
             if "rate_limit" in str(e):
-                wait_time = 3 + attempt * 2
-                await asyncio.sleep(wait_time)
+                await asyncio.sleep(3 + attempt * 2)
             else:
                 raise e
     return None
@@ -138,26 +134,41 @@ async def upload_excel(file: UploadFile = File(...), db: Session = Depends(get_d
                 if not name or not email or not cv_url:
                     continue
 
+                jd = jd_map.get(role)
+                if not jd:
+                    continue
+
                 local_cv = download_cv_from_drive(cv_url)
                 if not local_cv:
                     continue
 
                 resume_text = parse_cv(local_cv)
+                resume_lower = resume_text.lower()
 
-                profile = await safe_ai_parse(resume_text)
-                if not profile:
-                    continue
+                # basic keyword scoring
+                basic_score = 0
 
-                await asyncio.sleep(2)
+                for keyword in jd.get("must_have_skills", []):
+                    if keyword.lower() in resume_lower:
+                        basic_score += 10
 
-                jd = jd_map.get(role)
-                if not jd:
-                    continue
+                for keyword in jd.get("good_to_have_skills", []):
+                    if keyword.lower() in resume_lower:
+                        basic_score += 5
 
-                cv_score, _ = score_candidate(profile, jd)
+                # decide whether to call AI
+                if basic_score >= 20:
+                    profile = await safe_ai_parse(resume_text)
+                    if profile:
+                        cv_score, _ = score_candidate(profile, jd)
+                    else:
+                        cv_score = basic_score
+                else:
+                    cv_score = basic_score
 
                 username = email
                 password = str(uuid.uuid4())[:8]
+                status = "shortlisted" if cv_score >= CV_THRESHOLD else "rejected"
 
                 candidate = Candidate(
                     id=str(uuid.uuid4()),
@@ -167,21 +178,22 @@ async def upload_excel(file: UploadFile = File(...), db: Session = Depends(get_d
                     username=username,
                     password=password,
                     cv_score=cv_score,
-                    status="shortlisted" if cv_score >= CV_THRESHOLD else "rejected",
+                    status=status,
                     created_at=datetime.utcnow()
                 )
 
                 db.add(candidate)
                 db.commit()
 
-                if cv_score >= CV_THRESHOLD:
+                # send to GHL only if shortlisted
+                if status == "shortlisted":
                     link = f"{settings.HR_INTERVIEW_CALENDAR}/login"
                     upsert_ghl_contact(
                         name=name,
                         email=email,
                         phone=phone,
                         interview_link=link,
-                        score=0,
+                        score=cv_score,
                         username=username,
                         password=password
                     )
@@ -234,7 +246,7 @@ def interview_page(candidate_id: str, role: str, db: Session = Depends(get_db)):
         for i, q in enumerate(questions):
             db.add(InterviewAnswer(
                 candidate_id=candidate_id,
-                question_number=i+1,
+                question_number=i + 1,
                 question_text=q
             ))
         db.commit()
