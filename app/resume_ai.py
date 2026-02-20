@@ -1,6 +1,7 @@
 import requests
 import json
 import re
+import time
 from app.config import settings
 
 
@@ -18,6 +19,7 @@ SALES_KEYWORDS = [
     "growth", "pre-sales"
 ]
 
+
 def normalize_sales(profile: dict) -> dict:
     text = " ".join([
         str(profile.get("current_role", "")),
@@ -29,8 +31,22 @@ def normalize_sales(profile: dict) -> dict:
     return profile
 
 
+def extract_json(content: str) -> dict:
+    matches = re.findall(r"\{.*?\}", content, re.DOTALL)
+    if not matches:
+        raise ValueError("No JSON found in LLM response")
+
+    for match in matches:
+        try:
+            return json.loads(match)
+        except json.JSONDecodeError:
+            continue
+
+    raise ValueError("Invalid JSON format in LLM response")
+
+
 def parse_resume_with_ai(resume_text: str) -> dict:
-    resume_text = resume_text[:6000]
+    resume_text = resume_text[:4000]
 
     prompt = f"""
 Return ONLY valid JSON.
@@ -53,23 +69,38 @@ Resume:
     payload = {
         "model": "llama-3.1-8b-instant",
         "messages": [
-            {"role": "system", "content": "Return strict JSON only"},
+            {"role": "system", "content": "Return strict JSON only. No markdown. No explanation."},
             {"role": "user", "content": prompt}
         ],
         "temperature": 0,
-        "max_tokens": 800
+        "max_tokens": 600
     }
 
-    response = requests.post(GROQ_URL, headers=HEADERS, json=payload, timeout=60)
+    for attempt in range(5):
+        response = requests.post(
+            GROQ_URL,
+            headers=HEADERS,
+            json=payload,
+            timeout=60
+        )
 
-    if response.status_code != 200:
-        raise Exception(response.text)
+        if response.status_code == 429:
+            time.sleep(3 + attempt * 2)
+            continue
 
-    content = response.json()["choices"][0]["message"]["content"]
+        if response.status_code != 200:
+            raise Exception(response.text)
 
-    match = re.search(r"\{.*\}", content, re.DOTALL)
-    if not match:
-        raise ValueError("Invalid LLM output")
+        try:
+            content = response.json()["choices"][0]["message"]["content"]
+        except Exception:
+            raise Exception("Invalid Groq response structure")
 
-    profile = json.loads(match.group())
-    return normalize_sales(profile)
+        try:
+            profile = extract_json(content)
+            return normalize_sales(profile)
+        except Exception:
+            time.sleep(2)
+            continue
+
+    raise Exception("Failed to parse resume after retries")

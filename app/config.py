@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     GHL_LINK_FIELD_ID: str
     GHL_USERNAME_FIELD_ID: str
     GHL_PASSWORD_FIELD_ID: str
+    HR_INTERVIEW_CALENDAR: str
 
     # GROQ
     GROQ_API_KEY: str
