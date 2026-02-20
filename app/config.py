@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     # GHL
     GHL_API_KEY: str
     GHL_LOCATION_ID: str
-    GHL_API_URL: str
+    GHL_API_BASE: str
     GHL_SCORE_FIELD_ID: str
     GHL_LINK_FIELD_ID: str
     GHL_USERNAME_FIELD_ID: str
