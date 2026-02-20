@@ -109,21 +109,17 @@ def upsert_ghl_contact(name, email, phone, interview_link, score, username, pass
 @app.get("/")
 def root():
     return {"status": "HRMS ATS running"}
+
+
 @app.post("/excel/upload")
 async def upload_excel(file: UploadFile = File(...), db: Session = Depends(get_db)):
 
     excel_data = pd.read_excel(file.file, sheet_name=None)
-    jd_map = get_jd_requirements()
 
-    SALES_CORE = [
-        "sales", "b2b", "lead generation", "cold calling",
-        "outreach", "prospecting", "closing", "negotiation",
-        "pipeline", "demo"
-    ]
-
-    SAAS_TERMS = [
-        "saas", "cloud", "ai", "enterprise", "crm",
-        "salesforce", "hubspot", "azure", "google workspace"
+    SALES_ALIGNMENT = [
+        "sales", "b2b", "lead generation",
+        "cold calling", "client acquisition",
+        "outreach", "prospecting"
     ]
 
     for sheet_name, df in excel_data.items():
@@ -151,37 +147,44 @@ async def upload_excel(file: UploadFile = File(...), db: Session = Depends(get_d
                 resume_text = parse_cv(local_cv)
                 resume_lower = resume_text.lower()
 
-                total_score = 0
+                
 
-                # 1️⃣ Core Sales Scoring
-                sales_hits = sum(1 for k in SALES_CORE if k in resume_lower)
-                total_score += min(sales_hits * 10, 40)
+                score = 0
 
-                # 2️⃣ SaaS / Cloud / AI Exposure
-                saas_hits = sum(1 for k in SAAS_TERMS if k in resume_lower)
-                total_score += min(saas_hits * 8, 25)
+                matched_keywords = []
 
-                # 3️⃣ CRM Tools
-                crm_hits = sum(1 for k in ["salesforce", "hubspot", "zoho", "pipedrive"] if k in resume_lower)
-                total_score += min(crm_hits * 7, 15)
+                # If basic sales word present → base 50
+                if any(k in resume_lower for k in SALES_ALIGNMENT):
+                    score = 50
 
-                # 4️⃣ B2B / Enterprise bonus
-                if "b2b" in resume_lower or "enterprise" in resume_lower:
-                    total_score += 10
+                # Add +5 per matched keyword
+                for k in SALES_ALIGNMENT:
+                    if k in resume_lower:
+                        matched_keywords.append(k)
+                        score += 5
 
-                # 5️⃣ Experience
+                # Experience bonus
                 exp_match = re.search(r'(\d+)\s+years', resume_lower)
                 if exp_match:
                     years = int(exp_match.group(1))
                     if years >= 2:
-                        total_score += 10
+                        score += 5
 
-                cv_score = total_score
+                # Cap score at 75
+                score = min(score, 75)
+
+
+                if score < 45:
+                    status = "rejected"
+                elif 45 <= score < 50:
+                    status = "alternate"
+                elif 50 <= score < 60:
+                    status = "shortlisted"
+                else:
+                    status = "shortlisted"
 
                 username = email
                 password = str(uuid.uuid4())[:8]
-
-                status = "shortlisted" if cv_score >= 40 else "rejected"
 
                 candidate = Candidate(
                     id=str(uuid.uuid4()),
@@ -191,7 +194,7 @@ async def upload_excel(file: UploadFile = File(...), db: Session = Depends(get_d
                     role=role,
                     username=username,
                     password=password,
-                    cv_score=cv_score,
+                    cv_score=score,
                     status=status,
                     created_at=datetime.utcnow()
                 )
@@ -199,6 +202,7 @@ async def upload_excel(file: UploadFile = File(...), db: Session = Depends(get_d
                 db.add(candidate)
                 db.commit()
 
+                # Send to GHL only if shortlisted
                 if status == "shortlisted":
                     link = f"{settings.HR_INTERVIEW_CALENDAR}/login"
                     upsert_ghl_contact(
@@ -206,7 +210,7 @@ async def upload_excel(file: UploadFile = File(...), db: Session = Depends(get_d
                         email=email,
                         phone=phone,
                         interview_link=link,
-                        score=cv_score,
+                        score=score,
                         username=username,
                         password=password
                     )
